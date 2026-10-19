@@ -233,6 +233,42 @@ def lattice(d, cx, cy, w, h, prog, color):
             d.polygon([(a, b), (c, e), (2 * c - a, b), (c, 2 * b - e)], outline=color, width=8)
         else: d.line([(a, b), (c, e)], fill=color, width=10)
 
+
+# ------------------------------------------------------------------ Clawd hopping across words
+LAND = 0.08                         # Clawd lands just after a char pops in
+def hop_path(t, pts, hop=0.2):
+    """pts: [(t, x, feet, U), ...]; the first is where Clawd starts. Clawd jumps so it lands on pts[k] at its time."""
+    cur = 0
+    for k in range(1, len(pts)):
+        if t >= pts[k][0]: cur = k
+    _, x, f, u = pts[cur]; sx = sy = 1.0
+    if cur + 1 < len(pts):
+        nt, nx, nf, nu = pts[cur + 1]
+        dur = min(hop, (nt - pts[cur][0]) * 0.85) if cur > 0 else max(hop, 0.32)
+        t0 = nt - dur
+        if t > t0:
+            q = (t - t0) / dur
+            h = 46 + 0.12 * abs(nx - x) + 0.4 * abs(nf - f)
+            x, u = lerp(x, nx, q), lerp(u, nu, q)
+            f = lerp(f, nf, q) - h * 4 * q * (1 - q); sy, sx = 1.08, 0.94
+    if cur > 0:
+        q = seg(t, pts[cur][0], pts[cur][0] + 0.14)
+        if q < 1: sy = 1 - 0.22 * math.sin(math.pi * q); sx = 2 - sy
+    return x, f, u, sx, sy, cur
+
+def word_targets(i, k0, k1, x, y, size, gap=1.02):
+    """Landing spots on top of chars k0..k1-1 as typeset by chars()."""
+    return [(ct(i, k) + LAND, x + (k - k0) * size * gap + size / 2, y + 0.1 * size, None) for k in range(k0, k1)]
+
+def dips(t, i, k0, k1, amp=12):
+    out = []
+    for k in range(k0, k1):
+        q = seg(t, ct(i, k) + LAND, ct(i, k) + LAND + 0.16)
+        out.append((0, amp * math.sin(math.pi * q) if 0 < q < 1 else 0))
+    return out
+
+def with_u(tg, u): return [(a, b, c, u) for a, b, c, _ in tg]
+
 # ------------------------------------------------------------------ scenes
 def sc_intro(img, d, t):
     img.paste(bg_solid(DARK), (0, 0)); d = ImageDraw.Draw(img)
@@ -243,17 +279,25 @@ def sc_intro(img, d, t):
             a = ease_out(seg(t, 2.2, 2.5))
             x0, y0 = 160, 210 + (1 - a) * 20
             d.rounded_rectangle([x0, y0, 1760, y0 + 250], radius=14, outline=mix(DARK, OR, a), width=4)
-            clawd(d, x0 + 150, y0 + 190, U=16, eyes="normal", blink=ms_blink(t, (3.4,)))
             d.text((x0 + 300, y0 + 70), "Claude Code", font=F(62, "s"), fill=mix(DARK, (240, 236, 228), a), anchor="lm")
             d.text((x0 + 300, y0 + 140), "春日模式 · 早安", font=F(40, "r"), fill=mix(DARK, GRAY, a), anchor="lm")
             d.text((x0 + 300, y0 + 200), "~/春天/河边", font=F(36, "r"), fill=mix(DARK, GRAY, a), anchor="lm")
+        msg = "出门走走吧"; f68 = F(68); T0, CE = 4.4, 0.22
         if t > 4.0:
             d.rounded_rectangle([160, 520, 1760, 660], radius=14, outline=(90, 86, 82), width=3)
             d.text((200, 590), ">", font=F(64, "m"), fill=OR, anchor="lm")
-            msg = "出门走走吧"; n = int(seg(t, 4.4, 4.4 + 0.22 * len(msg)) * len(msg))
-            d.text((270, 590), msg[:n], font=F(68), fill=(240, 236, 228), anchor="lm")
+            n = min(len(msg), max(0, int((t - T0) / CE) + 1)) if t >= T0 else 0
+            for k in range(n):
+                q = seg(t, T0 + k * CE + LAND, T0 + k * CE + LAND + 0.16); dy = 10 * math.sin(math.pi * q) if 0 < q < 1 else 0
+                d.text((270 + f68.getlength(msg[:k]), 590 + dy), msg[k], font=f68, fill=(240, 236, 228), anchor="lm")
             if int(t * 2.5) % 2 == 0 or t < 6.0:
-                cx = 270 + F(68).getlength(msg[:n]) + 8; d.rectangle([cx, 558, cx + 32, 622], fill=(240, 236, 228))
+                cx = 270 + f68.getlength(msg[:n]) + 8; d.rectangle([cx, 558, cx + 32, 622], fill=(240, 236, 228))
+        if t > 2.2:
+            pts = [(0, 310, 400, 16), (4.1, 232, 520, 10)]
+            pts += [(T0 + k * CE + LAND, 270 + f68.getlength(msg[:k]) + f68.getlength(msg[k]) / 2, 556, 10) for k in range(len(msg))]
+            x, f, u, sx, sy, cur = hop_path(t, pts)
+            clawd(d, x, f, U=u, sx=sx, sy=sy, eyes="happy" if cur >= 2 else "normal", ex=0.3 if cur >= 1 else 0,
+                  blink=ms_blink(t, (3.4,)))
         if t > 6.6:
             sp = "·✢✳✶✻✽"[int(t * 10) % 6]
             d.text((180, 750), sp, font=F(48, "s"), fill=OR, anchor="lm")
@@ -339,12 +383,15 @@ def sc2(img, d, t):   # 暖阳刚好照在你的眉梢
         a = seg(t, ct(2, 3) + 0.15, ct(2, 3) + 0.35)
         if a > 0: d.line([(170, 420), (200, 455), (260, 390)][:2 + int(a > 0.5)], fill=GREEN, width=12)
         d.text((280, 425), "已应用", font=F(34, "r"), fill=GRAY, anchor="lm")
-    chars(img, t, 2, 4, 6, 1000, 600, 150, INK, ext=10, extc=OR)
-    chars(img, t, 2, 6, 8, 1000, 780, 120, OR, ext=8, extc=OR_D)
-    chars(img, t, 2, 8, 10, 1300, 760, 170, YEL, ext=12, extc=YEL_D, kind="stamp")
+    chars(img, t, 2, 4, 6, 1000, 600, 150, INK, ext=10, extc=OR, offsets=dips(t, 2, 4, 6))
+    chars(img, t, 2, 6, 8, 1000, 780, 120, OR, ext=8, extc=OR_D, offsets=dips(t, 2, 6, 8))
+    chars(img, t, 2, 8, 10, 1300, 760, 170, YEL, ext=12, extc=YEL_D, kind="pop", offsets=dips(t, 2, 8, 10))
     if t > ct(2, 9):
         for k in range(3): sparkle(img_draw(img), 1300 + k * 160, 730 + 30 * math.sin(t * 6 + k), 26 * (0.6 + 0.4 * pulse(t)), WHITE)
-    clawd(img_draw(img), 380, 1000 + breathe(t), U=24, eyes="happy", blush=0.4, ex=0.3)
+    pts = [(0, 760, 160, 12)] + with_u(word_targets(2, 4, 6, 1000, 600, 150) + word_targets(2, 6, 8, 1000, 780, 120)
+                                       + word_targets(2, 8, 10, 1300, 760, 170), 12)
+    x, f, u, sx, sy, cur = hop_path(t, pts)
+    clawd(img_draw(img), x, f, U=u, sx=sx, sy=sy, eyes="happy" if cur else "normal", blush=0.4, ex=0.3 if not cur else 0)
 
 def img_draw(img): return ImageDraw.Draw(img)
 
@@ -394,10 +441,12 @@ def sc4(img, d, t):   # 偷看你走过柳荫摇摇摇
     img.paste(bg_solid((108, 168, 112), dot_c=(98, 156, 102)), (0, 0)); d = ImageDraw.Draw(img)
     w = willow(d, t, 700, W, 1.0, leaf=(70, 124, 70), leaf2=(150, 206, 130))
     d.polygon([(0, 0), (760, 0), (620, H), (0, H)], fill=(222, 218, 212))
-    top = clawd(d, 560, 1000 + breathe(t), U=24, eyes="normal", ex=0.45, blush=0.4)
     chars(img, t, 4, 0, 3, 90, 760, 60, GRAY, kind="fade")
     put(img, glyph("(小声)", 34, GRAY, kind="r"), 230, 860, 1, clamp((t - ct(4, 2)) * 4))
-    chars(img, t, 4, 3, 7, 840, 680, 150, WHITE, ext=10, extc=(40, 90, 50), kind="slideL")
+    chars(img, t, 4, 3, 7, 840, 680, 150, WHITE, ext=10, extc=(40, 90, 50), kind="pop", offsets=dips(t, 4, 3, 7))
+    pts = [(0, 560, 1000, 24)] + with_u(word_targets(4, 3, 7, 840, 680, 150), 13)
+    x, f, u, sx, sy, cur = hop_path(t, pts, hop=0.22)
+    clawd(img_draw(img), x, f, U=u, sx=sx, sy=sy, eyes="normal" if not cur else "happy", ex=0.45 if not cur else 0, blush=0.4)
     for j in range(3):                                     # 摇摇摇 swing from strings
         kk = 7 + j; t0 = ct(4, kk)
         if t < t0: continue
@@ -408,66 +457,125 @@ def sc4(img, d, t):   # 偷看你走过柳荫摇摇摇
         sc, a, *_ = anim(t, t0, "pop")
         put(img, glyph(LYR[4][kk], 140, YEL, 10, YEL_D), bx, by + 70, sc, a, -math.degrees(ang))
 
+CLOSE = dict(U=160, cx=960, feet=1520)        # close-up framing: eyes land at x=560 / 1360, y=560
+def push(t, t0, t1, far, near):
+    """Camera move between two Clawd framings (dicts of U, cx, feet)."""
+    q = ease_io(seg(t, t0, t1))
+    return {k: lerp(far[k], near[k], q) for k in far}, q
+
+def eye_centers(fr, ex=0.0, ey=0.0):
+    U = fr["U"]; return [(fr["cx"] + (eu + ex - 6) * U, fr["feet"] - (6 - ey) * U) for eu in (3.5, 8.5)]
+
+T57 = None
 def sc5(img, d, t):   # 你故意停步转头瞧瞧瞧
-    if t < ct(5, 7):
-        img.paste(bg_solid(BLUE, dot_c=(60, 104, 240)), (0, 0)); d = ImageDraw.Draw(img)
-        chars(img, t, 5, 0, 3, 140, 160, 150, WHITE, ext=10, extc=BLUE_D)
+    tz0, tz1 = ct(5, 7) - 0.5, ct(5, 7) - 0.02
+    FAR = dict(U=22, cx=260, feet=1010)
+    img.paste(bg_solid(BLUE, dot_c=(60, 104, 240)), (0, 0)); d = ImageDraw.Draw(img)
+    fade = 1 - seg(t, tz0, tz0 + 0.25)
+    if fade > 0:
+        chars(img, t, 5, 0, 3, 140, 160, 150, WHITE, ext=10, extc=BLUE_D, alpha=fade)
         sc, a, *_ = anim(t, ct(5, 3), "stamp")
         if a > 0:
             box = Image.new("RGBA", (440, 230), (0, 0, 0, 0)); bd = ImageDraw.Draw(box)
             bd.rounded_rectangle([6, 6, 434, 224], radius=20, outline=(255, 90, 90), width=12)
             box.paste(glyph("停步", 150, (255, 90, 90)), (30, 14), glyph("停步", 150, (255, 90, 90)))
-            put(img, box, 1200, 260, sc, a, -6)
+            put(img, box, 1200, 260, sc, a * fade, -6)
         for j, kk in enumerate((5, 6)):                    # 转头: flip
             t0 = ct(5, kk)
             if t < t0: continue
             fl = abs(math.cos(math.pi * seg(t, t0, t0 + 0.4))) if t < t0 + 0.4 else 1
             g = glyph(LYR[5][kk], 200, YEL, 12, YEL_D)
-            g2 = g.resize((max(1, int(g.width * fl)), g.height))
-            put(img, g2, 700 + j * 240, 700, 1, 1)
-        clawd(d, 260, 1010 + breathe(t), U=22, eyes="wide", ex=0.4, blush=0.3)
-        return
-    # 瞧瞧瞧: we are inside Clawd's face, words in the eyes
-    img.paste(bg_solid(OR, dots=False), (0, 0)); d = ImageDraw.Draw(img)
-    for j, (ex_, kk) in enumerate(((560, 7), (1360, 8))):
-        h = 520 * ms_blink(t, (ct(5, 9) + 0.6,), 0.1)
-        d.rectangle([ex_ - 130, 300 + (520 - h) / 2, ex_ + 130, 300 + (520 + h) / 2], fill=INK)
-        sc, a, *_ = anim(t, ct(5, kk), "stamp")
-        put(img, glyph(LYR[5][kk], 150, WHITE), ex_, 560, sc, a)
-    sc, a, *_ = anim(t, ct(5, 9), "stamp")
-    put(img, glyph(LYR[5][9], 170, WHITE, 10, OR_D), 960, 940, sc, a)
+            put(img, g.resize((max(1, int(g.width * fl)), g.height)), 700 + j * 240, 700, 1, fade)
+    fr, q = push(t, tz0, tz1, FAR, CLOSE)
+    if t > tz1: fr = dict(CLOSE, U=CLOSE["U"] * (1 + 0.02 * seg(t, tz1, L[6])))   # slow drift once we're in
+    look = [-0.12, 0.12, 0][min(2, max(0, int((t - ct(5, 7)) / E)))] if t >= ct(5, 7) else 0.4 * (1 - q)
+    clawd(d, fr["cx"], fr["feet"], U=fr["U"], eyes="normal" if q > 0.5 else "wide", ex=look,
+          blink=ms_blink(t, (ct(5, 9) + 0.75,), 0.1), blush=0.3)
+    if t >= ct(5, 7):
+        for (x, y), kk in zip(eye_centers(fr, look), (7, 8)):
+            sc, a, *_ = anim(t, ct(5, kk), "stamp")
+            put(img, glyph(LYR[5][kk], 120, WHITE), x, y, sc, a)
+        sc, a, *_ = anim(t, ct(5, 9), "stamp")
+        put(img, glyph(LYR[5][9], 170, WHITE, 10, OR_D), 960, 960, sc, a)
 
+STAMP_FAR = dict(U=34, cx=720, feet=900)
 def sc6(img, d, t):   # 我脸红局促像个呆头鸟
-    if t < ct(6, 7):
-        img.paste(bg_solid(mix(OR, (236, 110, 120), 0.35 * seg(t, ct(6, 1), ct(6, 5))), dots=False), (0, 0)); d = ImageDraw.Draw(img)
-        sh = 1 + 0.03 * math.sin(t * 40) if t > ct(6, 3) else 1
-        for ex_ in (560, 1360):
-            d.rectangle([ex_ - 130 * sh, 300, ex_ + 130 * sh, 820], fill=INK)
-        b = ease_out(seg(t, ct(6, 1), ct(6, 3)))
-        for ex_ in (560, 1360):
-            d.rectangle([ex_ - 190 * b, 880, ex_ + 190 * b, 960], fill=(240, 110, 130))
-        chars(img, t, 6, 0, 1, 900, 120, 110, WHITE, kind="pop")
-        chars(img, t, 6, 1, 3, 480, 540, 150, (255, 200, 210), kind="stamp", gap=5.3)
-        chars(img, t, 6, 3, 5, 790, 980, 90, WHITE, kind="pop", jitter=6)
-        chars(img, t, 6, 5, 7, 1500, 980, 70, WHITE, kind="fade")
+    tz0, tz1 = ct(6, 4) + 0.12, ct(6, 5) + 0.2       # zoom back out while "像个" is sung
+    if t < tz1:
+        fr, q = push(t, tz0, tz1, dict(CLOSE, U=CLOSE["U"] * 1.02), STAMP_FAR)
+        pink = 0.45 * seg(t, ct(6, 1), ct(6, 4))
+        bgc = mix(mix(BLUE, (236, 120, 140), pink), DARK, q)
+        img.paste(bg_solid(bgc, dots=False), (0, 0)); d = ImageDraw.Draw(img)
+        jit = 0.03 * math.sin(t * 40) if ct(6, 3) < t < tz0 else 0
+        clawd(d, fr["cx"], fr["feet"], U=fr["U"], sx=1 + jit, eyes="wide" if t > ct(6, 3) else "normal",
+              blush=0.3 + 0.7 * ease_out(seg(t, ct(6, 1), ct(6, 3))))
+        a = 1 - q
+        chars(img, t, 6, 0, 1, 905, 70, 110, WHITE, kind="pop", alpha=a)
+        chars(img, t, 6, 1, 3, 480, 860, 150, (255, 214, 222), ext=8, extc=(200, 80, 100), kind="stamp", gap=5.3, alpha=a)
+        chars(img, t, 6, 3, 5, 870, 1000, 90, WHITE, kind="pop", jitter=6, alpha=a)
+        chars(img, t, 6, 5, 7, 120, 110, 90, WHITE, kind="fade")
         return
+    # Clawd sees the 呆 seal coming, sweats, tries to run — too late.
     img.paste(bg_solid(DARK), (0, 0)); d = ImageDraw.Draw(img)
-    t0 = ct(6, 7); x = seg(t, t0, t0 + 0.14)
-    sc = lerp(2.4, 1.0, ease_out(x)); shake = 14 * math.exp(-(t - t0) * 8) * math.sin(t * 90)
-    seal = seal_img()
-    if x > 0.02:
-        put(img, seal, 760 + shake, 470, sc * 1.25, 0.25 * x)
-        put(img, seal, 760 + shake, 470, sc, clamp(x * 3), -8)
-    rng = np.random.default_rng(1)
-    if t > t0 + 0.1:
-        for k in range(26):
-            a = rng.uniform(0, 6.28); r = 280 + 220 * ease_out(seg(t, t0 + 0.1, t0 + 0.6)) * rng.uniform(0.6, 1.2)
-            s = 10 * (1 - seg(t, t0 + 0.1, t0 + 0.9))
-            if s > 1: d.rectangle([760 + math.cos(a) * r - s, 470 + math.sin(a) * r - s, 760 + math.cos(a) * r + s, 470 + math.sin(a) * r + s], fill=RED)
-    chars(img, t, 6, 8, 10, 1120, 360, 170, WHITE, ext=10, extc=(90, 90, 90), kind="stamp")
-    top = clawd(d, 1460, 1010, U=22, eyes="dot", blush=1.0, ahoge=back_out(seg(t, t0 + 0.2, t0 + 0.45)), t=t)
-    if t > t0 + 0.3:
-        d.ellipse([1460 + 150, top + 20, 1460 + 180, top + 60], fill=(120, 182, 238))
+    GROUND = 900
+    t_see, t_run, t_fall, t_hit = ct(6, 7), ct(6, 7) + 0.32, ct(6, 7) + 0.62, ct(6, 7) + 0.8
+    t_lift, t_gone, t_pop = t_hit + 0.55, t_hit + 0.8, t_hit + 0.82
+    shake = 16 * math.exp(-(t - t_hit) * 7) * math.sin(t * 95) if t > t_hit else 0
+    d.line([(0, GROUND + 2 + shake * 0.3), (W, GROUND + 2 + shake * 0.3)], fill=(60, 58, 56), width=4)
+    chars(img, t, 6, 5, 7, 120 + shake, 110, 90, WHITE, kind="fade")
+    chars(img, t, 6, 8, 10, 1240 + shake, 300, 170, WHITE, ext=10, extc=(90, 90, 90), kind="stamp")
+    SX = 820
+    # seal position
+    seal = seal_img(); s_sc = 1.0; half = 520 * s_sc / 2
+    if t < t_see: sy_ = -400
+    elif t < t_fall: sy_ = lerp(-400, 270, ease_out(seg(t, t_see, t_see + 0.3))) + 10 * math.sin(t * 9)
+    elif t < t_hit: sy_ = lerp(270, GROUND - half, ease_in(seg(t, t_fall, t_hit)))
+    elif t < t_lift: sy_ = GROUND - half - 12 * math.exp(-(t - t_hit) * 9) * abs(math.sin((t - t_hit) * 30))
+    else: sy_ = lerp(GROUND - half, -500, ease_in(seg(t, t_lift, t_gone)))
+    # shadow grows as it falls
+    if t_see <= t < t_gone:
+        k = seg(sy_, 270, GROUND - half) if t < t_lift else 1 - seg(t, t_lift, t_gone)
+        sw = lerp(140, 430, k)
+        d.ellipse([SX - sw / 2 + shake, GROUND - 14, SX + sw / 2 + shake, GROUND + 18], fill=(12, 12, 12))
+    # Clawd
+    cx, feet, sx, sy, eyes, ex, ey, la, ra, ah, imprint = 720, GROUND, 1.0, 1.0, "normal", 0, 0, None, None, 0, 0
+    if t_see <= t < t_run: eyes, ey = "wide", -0.4
+    elif t_run <= t < t_hit:
+        q = seg(t, t_run, t_hit); eyes = "gt"
+        cx = lerp(720, 880, ease_in(q)); feet = GROUND - 14 * abs(math.sin((t - t_run) * 38))
+        la = ra = (70 + 30 * math.sin(t * 40), 2.6)
+    elif t_hit <= t < t_pop:
+        cx, sx, sy, eyes, imprint = 880, 1.55, 0.16, "x", 1
+    elif t >= t_pop:
+        q = seg(t, t_pop, t_pop + 0.25); cx = 880; sy = lerp(0.16, 1.0, back_out(q, 2.4)); sx = lerp(1.55, 1.0, ease_out(q))
+        eyes, ah, imprint = "dot", back_out(seg(t, t_pop + 0.1, t_pop + 0.3)), 1
+    top = clawd(d, cx + shake, feet, U=34, sx=sx, sy=sy, eyes=eyes, ex=ex, ey=ey, blush=0.9 if t >= t_hit else 0.5,
+                larm=la, rarm=ra, ahoge=ah, t=t)
+    if imprint and t > t_lift:
+        put(img, glyph("呆", int(max(24, 120 * min(1, sy * 2.5))), RED), cx + 90 + shake, feet - 3.2 * 34 * sy, 1, 0.85, -8)
+    if t_see + 0.1 < t < t_hit:                            # sweat, more and more
+        for k in range(1 + int(3 * seg(t, t_see, t_run))):
+            p = ((t - t_see) * 2.2 + k / 3) % 1
+            x0 = cx + (240 if k % 2 == 0 else -240); y0 = top + 30 + 120 * p
+            d.ellipse([x0 - 12, y0 - 12, x0 + 12, y0 + 14], fill=(120, 182, 238))
+            d.polygon([(x0 - 11, y0 - 4), (x0 + 11, y0 - 4), (x0, y0 - 30)], fill=(120, 182, 238))
+    if t_see <= t < t_run:
+        put(img, glyph("!", 90, YEL, kind="s"), cx, top - 70, back_out(seg(t, t_see, t_see + 0.15)), 1)
+    if t_see <= t < t_gone:
+        put(img, seal, SX + shake, sy_, s_sc, 1, -6 * (1 - seg(t, t_fall, t_hit)) if t < t_hit else 0)
+    if t_hit <= t < t_hit + 0.06:
+        img.paste(Image.blend(img, Image.new("RGB", (W, H), (255, 255, 255)), 0.28))
+    if t > t_hit:                                          # impact dust + red bits
+        p = seg(t, t_hit, t_hit + 0.6); rng = np.random.default_rng(6)
+        for side in (-1, 1):
+            for k in range(4):
+                r = (20 + 40 * k) * (0.4 + p) * (1 - p) + 2
+                x = SX + side * (half + 40 + 60 * k * p); y = GROUND - 10 - 20 * k * p
+                d.ellipse([x - r, y - r, x + r, y + r], fill=(90, 86, 82))
+        for k in range(20):
+            a_ = rng.uniform(3.4, 6.0); r = 240 + 300 * ease_out(p) * rng.uniform(0.6, 1.2); s_ = 10 * (1 - p)
+            if s_ > 1: d.rectangle([SX + math.cos(a_) * r - s_, GROUND - 100 + math.sin(a_) * r * 0.6 - s_,
+                                    SX + math.cos(a_) * r + s_, GROUND - 100 + math.sin(a_) * r * 0.6 + s_], fill=RED)
 
 @lru_cache(None)
 def seal_img():
@@ -659,12 +767,15 @@ def sc14(img, d, t):   # 你说这夜色刚好刚好
         d.rectangle([x, y, x + 3, y + 3], fill=mix((40, 44, 90), (240, 240, 255), tw))
     d.ellipse([1500, 120, 1700, 320], fill=(252, 240, 200)); d.ellipse([1560, 100, 1760, 300], fill=(28, 32, 70))
     tag(img, t, ct(14, 0), "你说", 120, 120, 90)
-    chars(img, t, 14, 2, 5, 120, 300, 170, (236, 236, 255), ext=8, extc=(70, 80, 140), kind="fade", glow=0)
+    chars(img, t, 14, 2, 5, 120, 300, 170, (236, 236, 255), ext=8, extc=(70, 80, 140), kind="pop", offsets=dips(t, 14, 2, 5))
     for j, (k0, x, y) in enumerate(((5, 860, 560), (7, 1220, 760))):
         sc, a, *_ = anim(t, ct(14, k0), "pop")
         if a > 0: put(img, check_img(), x - 50, y + 80, sc * 0.8, a)
-        chars(img, t, 14, k0, k0 + 2, x + 40, y, 150, WHITE, ext=8, extc=(70, 80, 140), kind="pop")
-    clawd(d, 420, 1010 + breathe(t, 3), U=26, eyes="soft", blush=0.5, ex=0.3, ey=-0.3)
+        chars(img, t, 14, k0, k0 + 2, x + 40, y, 150, WHITE, ext=8, extc=(70, 80, 140), kind="pop", offsets=dips(t, 14, k0, k0 + 2))
+    pts = [(0, 420, 1010, 26)] + with_u(word_targets(14, 2, 5, 120, 300, 170) + word_targets(14, 5, 7, 900, 560, 150)
+                                        + word_targets(14, 7, 9, 1260, 760, 150), 13)
+    x, f, u, sx, sy, cur = hop_path(t, pts)
+    clawd(img_draw(img), x, f, U=u, sx=sx, sy=sy, eyes="soft" if cur < 9 else "happy", blush=0.5, ex=0.3 if not cur else 0, ey=-0.3 if not cur else 0)
 
 def sc15(img, d, t):   # 我想这相遇真是太巧
     img.paste(bg_solid(PAPER, halftone=True), (0, 0)); d = ImageDraw.Draw(img)
@@ -682,9 +793,12 @@ def sc15(img, d, t):   # 我想这相遇真是太巧
         for k in range(8):
             a = k * math.pi / 4; r = 120 + 260 * ease_out(p)
             sparkle(d, 960 + math.cos(a) * r, 470 + math.sin(a) * r * 0.7, 22 * (1 - p) + 2, YEL)
-    chars(img, t, 15, 5, 7, 420, 760, 170, INK, ext=12, extc=OR, kind="stamp")
-    chars(img, t, 15, 7, 9, 860, 720, 220, OR, ext=14, extc=OR_D, kind="stamp")
-    clawd(d, 1600, 1010 + breathe(t, 4), U=26, eyes="happy", blush=0.9, rarm=50 + 20 * math.sin(t * 10) if t > ct(15, 8) else None)
+    chars(img, t, 15, 5, 7, 420, 760, 170, INK, ext=12, extc=OR, kind="pop", offsets=dips(t, 15, 5, 7))
+    chars(img, t, 15, 7, 9, 860, 720, 220, OR, ext=14, extc=OR_D, kind="pop", offsets=dips(t, 15, 7, 9, 16))
+    pts = [(0, 1600, 1010, 26)] + with_u(word_targets(15, 5, 7, 420, 760, 170), 15) + with_u(word_targets(15, 7, 9, 860, 720, 220), 17)
+    x, f, u, sx, sy, cur = hop_path(t, pts, hop=0.24)
+    clawd(img_draw(img), x, f + (breathe(t, 3) if t > ct(15, 8) + 0.6 else 0), U=u, sx=sx, sy=sy, eyes="happy", blush=0.9,
+          rarm=50 + 20 * math.sin(t * 10) if t > ct(15, 8) + 0.4 else None)
 
 SCENES = [sc0, sc1, sc2, sc3, sc4, sc5, sc6, sc7, sc8, sc9, sc10, sc11, sc12, sc13, sc14, sc15]
 
@@ -720,7 +834,7 @@ if __name__ == "__main__":
     ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
                            "-r", str(FPS), "-i", "-", "-t", str(END), "-i", song,
                            "-af", f"afade=t=in:st=0:d=0.4,afade=t=out:st={END - 1.4}:d=1.4",
-                           "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+                           "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "medium", "-b:v", "9M", "-maxrate", "12M", "-bufsize", "18M",
                            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart", OUT],
                           stdin=subprocess.PIPE)
     with Pool(os.cpu_count()) as pool:
