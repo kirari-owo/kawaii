@@ -1,3 +1,4 @@
 __pycache__/
 # rendered MV contains the original song audio; keep it out of the repo
 mv/*.mp4
+mv/lyrics.txt
