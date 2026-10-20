@@ -21,6 +21,7 @@ LAND = 0.08
 HU = 14
 S0 = 140
 FLOOR = 1010
+FLING_T = 0.0
 
 # ------------------------------------------------------------------ word layouts (world coords: centre x, centre y, size)
 def _row(pts, s=S0): return [(x, y, s) for x, y in pts]
@@ -131,7 +132,9 @@ def clamp_cam(z, fx, fy):
 TRANS = {1: "slide_up", 2: "iris_sun", 3: "flash", 4: "wipe_ecg", 5: "wipe_green", 6: "rise_pink", 7: "cut",
          8: "wind", 9: "heart", 10: "box", 11: "crt", 12: "diag", 13: "dark", 14: "slide_down", 15: "white"}
 TR_A, TR_B = 0.3, 0.18                # transition spans [L[i]-TR_A, L[i]+TR_B]
-def tr_q(i, t): return seg(t, L[i] - TR_A, L[i] + TR_B)
+TRA = {1: 0.45, 14: 0.75}
+def tr_a(i): return TRA.get(i, TR_A)
+def tr_q(i, t): return seg(t, L[i] - tr_a(i), L[i] + TR_B)
 
 def offset(i, t):
     """Screen offset of scene i (for sliding transitions)."""
@@ -154,6 +157,8 @@ STAMP_T = ct(6, 7)
 HIT_T = ct(6, 9) + LAND + 0.22
 LIFT_T, SETTLE_T, POP_T = HIT_T + 0.5, HIT_T + 0.85, HIT_T + 0.78
 TRIP_T = ct(7, 3) + 0.05
+SQUEEZE_T = ct(13, 5)
+FLING_T = ct(13, 8) + 0.35
 LATTICE = (380, 430, 400)
 SLEEP = (500, LATTICE[1] - LATTICE[2] / 2 - 4)
 
@@ -166,7 +171,8 @@ def build_nodes():
         if i == 6: n.append((L[6] - 0.3, ("w", 5, (FALL_X + 70, FLOOR), 1.0), "none"))
         if i in STATION:
             x, y, sc = STATION[i]
-            n.append((L[i] + (0.3 if i == 1 else 0.15), ("w", i, (x, y), sc), "fall" if i == 1 else "hop"))
+            n.append((L[i] + (0.4 if i == 1 else 0.3 if i == 14 else 0.15), ("w", i, (x, y), sc), "fall" if i in (1, 14) else "hop"))
+            if i == 13: n.append((FLING_T + 0.45, ("s", 1480, -420), "fling"))
             if i != 15: continue
         for k in range(len(LYR[i])):
             if i == 3 and 1 <= k <= 4: continue
@@ -174,14 +180,19 @@ def build_nodes():
             if i == 6 and k == 7: continue
             if i == 7 and k >= 3: continue
             if i == 15 and k < 5: continue
+            if i == 0 and k % 2 == 1: continue
             style = "hop"
             if i == 0: style = "fall" if k == 0 else "tumble"
             n.append((ct(i, k) + LAND, ("c", i, k), style))
         if i == 7: n.append((TRIP_T, ("w", 7, BALL, 1.0), "trip"))
+        if i == 0:
+            n.append((ct(0, 8) + LAND + 0.75, ("s", 1560, H + 260), "fall"))      # rolls off 翘, drops out of frame
+            n.append((L[1] + 0.05, ("s", 330, -260), "none"))                      # ...and comes in from the top
     return n
 NODES = build_nodes()
 
 def node_screen(node, t):
+    if node[0] == "s": return node[1], node[2], 1.0
     if node[0] == "c":
         _, i, k = node; f, z = xf(i, t); x, y = char_top(i, k, t); sx, sy = f(x, y); return sx, sy, z
     _, i, (x, y), sc = node; f, z = xf(i, t); sx, sy = f(x, y); return sx, sy, z * sc
@@ -196,20 +207,22 @@ def clawd_path(t):
         nt, nn, style = NODES[cur + 1]
         nx, ny, nz = node_screen(nn, t)
         gap = nt - NODES[cur][0]; dist = math.hypot(nx - x, ny - y)
-        if style == "fall": dur = min(0.9, gap * 0.9) if nn[1] == 1 else min(0.6, gap * 0.9)
-        elif style == "tumble": dur = min(0.2, gap * 0.85)
+        if style == "fall": dur = min(0.5, gap * 0.9) if nn[0] == "s" else min(0.35, gap * 0.9) if nn[1] == 1 else min(0.6, gap * 0.9)
+        elif style == "tumble": dur = gap * 0.72
+        elif style == "fling": dur = 0.45
         elif style == "trip": dur = 0.3
         elif style == "none": dur = 0.0
         else: dur = min(max(0.2, dist / 2400), gap * 0.85)
         if dur > 0 and t > nt - dur:
             q = (t - (nt - dur)) / dur
-            h = {"hop": 46 + 0.12 * abs(nx - x) + 0.4 * abs(ny - y), "tumble": 26, "fall": 0, "trip": 40}[style] * z
+            h = {"hop": 46 + 0.12 * abs(nx - x) + 0.4 * abs(ny - y), "tumble": 40, "fall": 0, "trip": 40, "fling": 160}[style] * z
             st.update(x=lerp(x, nx, q), y=lerp(y, ny, q) - h * 4 * q * (1 - q), z=lerp(z, nz, q), air=(style, q),
                       sx=0.94, sy=1.08)
-            if style == "tumble": st["rot"] = -360 * q
+            if style == "tumble": st["rot"] = -360 * ease_io(q)
+            if style == "fling": st["rot"] = -720 * q
             if style == "fall": st["rot"] = -90 - 270 * q if (nn[0] == "c" and nn[1] == 0) else -720 * q
             if style == "trip": st["rot"] = -100 * q
-    if st["air"] is None and cur > 0 and NODES[cur][2] not in ("none", None):
+    if st["air"] is None and cur > 0 and NODES[cur][2] not in ("none", None) and NODES[cur][1][0] != "s":
         q = seg(t, NODES[cur][0], NODES[cur][0] + 0.14)
         if q < 1: st["sy"] = 1 - 0.22 * math.sin(math.pi * q); st["sx"] = 2 - st["sy"]
     return st
@@ -298,7 +311,31 @@ def bg1(img, d, t):
                     px = x + 80 + pk * 90; py = y + 20 + 14 * math.sin(pk + t * 6)
                     d.ellipse([px - 10, py - 7, px + 10, py + 7], fill=(250, 190, 205))
 
-BGS = [bg_night_dawn, bg1, HP.bg2, bg3, HP.bg4, bg5, HP.bg6, bg7, bg8, HP.bg9, HP.bg10, HP.bg11, HP.bg12, HP.bg13, bg14, HP.bg15]
+CROWD = [(-1, 0.00, (226, 120, 98), 200), (1, 0.05, (120, 150, 210), 230), (-1, 0.12, (150, 196, 140), 180),
+         (1, 0.18, (230, 190, 90), 210), (-1, 0.24, (190, 140, 200), 240), (1, 0.30, (236, 150, 170), 190),
+         (-1, 0.36, (120, 200, 210), 220), (1, 0.42, (210, 130, 110), 200)]
+def person(d, x, feet, h, col, t, k):
+    w = h * 0.42; bob = 10 * abs(math.sin(t * 9 + k))
+    top = feet - h - bob
+    d.rounded_rectangle([x - w / 2, top + h * 0.32, x + w / 2, feet - bob], radius=int(w * 0.35), fill=col)
+    d.ellipse([x - w * 0.38, top, x + w * 0.38, top + w * 0.76], fill=mix(col, WHITE, 0.25))
+    d.rectangle([x - w * 0.18, top + w * 0.3, x - w * 0.1, top + w * 0.42], fill=INK)
+    d.rectangle([x + w * 0.1, top + w * 0.3, x + w * 0.18, top + w * 0.42], fill=INK)
+    d.line([(x - w / 2, top + h * 0.5), (x - w * 0.9, top + h * 0.3 - bob)], fill=col, width=int(w * 0.18))
+    d.line([(x + w / 2, top + h * 0.5), (x + w * 0.9, top + h * 0.3 - bob)], fill=col, width=int(w * 0.18))
+
+def bg13(img, d, t):
+    HP.bg13(img, d, t); d = ImageDraw.Draw(img)
+    if t < SQUEEZE_T - 0.1: return
+    cx = STATION[13][0]
+    for k, (side, delay, col, h) in enumerate(CROWD):
+        q = ease_out(seg(t, SQUEEZE_T - 0.1 + delay, FLING_T - 0.1 + delay * 0.5))
+        gap = 110 + 70 * (k // 2)
+        if t > FLING_T: gap -= 30 * ease_out(seg(t, FLING_T, FLING_T + 0.2))
+        x = lerp(cx + side * (1300 + 100 * k), cx + side * gap, q)
+        person(d, x, FLOOR + 6, h, col, t, k)
+
+BGS = [bg_night_dawn, bg1, HP.bg2, bg3, HP.bg4, bg5, HP.bg6, bg7, bg8, HP.bg9, HP.bg10, HP.bg11, HP.bg12, bg13, bg14, HP.bg15]
 
 # ------------------------------------------------------------------ one scene (world) -> screen
 def draw_words(img, t, i):
@@ -352,7 +389,7 @@ def compose(t):
         img = Image.new("RGB", (W, H), DARK); K.sc_intro(img, ImageDraw.Draw(img), t)
         return img
     i = max(0, line_at(t))
-    nxt = i + 1 if i + 1 < 16 and t >= L[i + 1] - TR_A else None
+    nxt = i + 1 if i + 1 < 16 and t >= L[i + 1] - tr_a(i + 1) else None
     if nxt is None and i >= 1 and t < L[i] + TR_B: a_i, b_i = i - 1, i
     elif nxt is not None: a_i, b_i = i, nxt
     else: return render_scene(i, t)
@@ -413,7 +450,8 @@ def draw_actors(img, t):
     eyes, blush, extra, rot = MOOD[i], 0.45, {}, st["rot"]
     air = st["air"]
     if air and air[0] == "hop": eyes = "happy" if eyes in ("normal", "happy", "x") else eyes
-    if air and air[0] in ("tumble", "fall"): eyes = "x" if NODES[st["cur"] + 1][1][1] == 0 or air[0] == "tumble" else "wide"
+    if air and air[0] in ("tumble", "fall"): eyes = "x" if air[0] == "tumble" or NODES[st["cur"] + 1][1] == ("c", 0, 0) else "wide"
+    if air and air[0] == "fling": eyes = "gt"
     if i == 3 and t >= ct(3, 5): eyes = "wide"
     if i == 4: extra["ex"] = 0.4 * math.sin(t * 3)
     if i == 6: blush = 0.45 + 0.55 * seg(t, ct(6, 1), ct(6, 3))
@@ -451,7 +489,14 @@ def draw_actors(img, t):
         eyes = "soft"
         p = seg(t, ct(11, 1), ct(11, 1) + 1.0)
         if 0 < p < 1: d.ellipse([x + 5 * U + 40 * p, y - 7 * U - 40 * p, x + 5 * U + 40 + 60 * p, y - 7 * U + 40 - 40 * p], fill=(230, 230, 236))
-    if on_station and i == 13: eyes, extra["ex"] = "wide", 0.4 * math.sin(t * 2.5)
+    if on_station and i == 13:
+        eyes, extra["ex"] = "wide", 0.4 * math.sin(t * 2.5)
+        if t >= SQUEEZE_T:
+            q = ease_in(seg(t, SQUEEZE_T + 0.1, FLING_T)); st["sx"] = lerp(1.0, 0.5, q); st["sy"] = lerp(1.0, 1.35, q)
+            x += 6 * math.sin(t * 60) * q; eyes, blush, extra["ex"] = "gt", 0.9, 0
+            for kk in range(1 + int(3 * q)):
+                p = ((t - SQUEEZE_T) * 2.6 + kk / 3) % 1; x0 = x + (5 * U if kk % 2 == 0 else -5 * U); y0 = y - 9 * U + 60 * p
+                d.ellipse([x0 - 9, y0 - 9, x0 + 9, y0 + 11], fill=(120, 182, 238))
     if on_station and i == 14: eyes, blush = "soft", 0.6
     if on_station and i == 15: eyes, blush = ("happy", 0.9) if t > ct(15, 4) + 0.1 else ("wide", 0.5)
     # ---- caught peeking: falls off 步 ----
