@@ -17,8 +17,13 @@ VOICE = sys.argv[1]
 END = 13.6
 SR = 44100
 
-# voice timing (from speech recognition): "好" "好" ... "十分钟" ... "好" "晚安" "真的"
-T_OK1, T_OK2, T_BUT, T_TEN, T_OK3, T_NIGHT, T_REAL, T_OFF = 0.0, 1.2, 2.68, 5.96, 7.96, 9.44, 10.88, 11.45
+# voice timing (English speech recognition):
+# "Alright… alright…" 0.0-1.9 | "But you've been acting coquettish for ten minutes now." 3.5-7.2 |
+# "It's time to say good night, really." 8.9-11.3
+T_OK1, T_OK2, T_BUT, T_TEN, T_OK3, T_NIGHT, T_REAL, T_OFF = 0.0, 1.14, 3.3, 6.14, 7.6, 9.6, 10.6, 11.45
+SUBS = [(0.05, 2.5, "好吧……好吧……", "Alright… alright…"),
+        (3.3, 7.7, "但是，你已经撒娇十分钟了。", "But you've been acting coquettish for ten minutes now."),
+        (8.75, 11.6, "该说晚安了，真的。", "It's time to say good night, really.")]
 
 def load_env():
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", VOICE, "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
@@ -106,7 +111,7 @@ def render_frame(fi):
     d = ImageDraw.Draw(img)
 
     # ---- Clawd ----
-    U = 38; cx = 960; feet = 975 - 40 * ease_io(seg(t, T_NIGHT - 0.4, T_NIGHT + 0.6))   # leans in over the bed
+    U = 38; cx = 960; feet = 935 - 30 * ease_io(seg(t, T_NIGHT - 0.4, T_NIGHT + 0.6))   # leans in over the bed
     v = talk(t)
     eyes, blush, ex, ey, la, ra, sx, sy = "soft", 0.35, 0.0, 0.0, None, None, 1.0, 1.0
     nod = 0.0
@@ -150,13 +155,12 @@ def render_frame(fi):
         if t > T_NIGHT:
             hx = cx + side * 5.2 * U; d.rectangle([hx - U * 0.6, btop - U * 0.5, hx + U * 0.6, btop + U * 0.4], fill=OR)
 
-    # subtitles (only the parts we are sure of)
-    sub = None
-    if 0.15 <= t < 2.4: sub = "好，好。"
-    elif T_OK3 <= t < T_REAL: sub = "好，晚安。"
-    elif T_REAL <= t < T_OFF + 0.8: sub = "真的。"
-    if sub:
-        put(img, glyph(sub, 56, (250, 246, 238), stroke=4, strokec=(30, 30, 40), kind="r"), 960, 1035, 1, 0.95)
+    # bilingual subtitles
+    for a0, a1, zh, en in SUBS:
+        al = ease_out(seg(t, a0, a0 + 0.2)) * (1 - seg(t, a1 - 0.2, a1))
+        if al > 0.01:
+            put(img, glyph(zh, 52, (250, 246, 238), stroke=4, strokec=(30, 30, 40), kind="r"), 960, 1000, 1, al)
+            put(img, glyph(en, 34, (226, 226, 240), stroke=3, strokec=(30, 30, 40), kind="r"), 960, 1052, 1, al)
 
     # lights out
     arr = np.asarray(img).astype(np.float32)
@@ -174,7 +178,9 @@ def render_frame(fi):
         for k in range(3):
             p = ((t - T_OFF - 0.4) * 0.45 + k / 3) % 1
             put(img, glyph("z", int(36 + 30 * p), (200, 206, 240), kind="s"), 1120 + 80 * p, 520 - 140 * p, 1, (1 - p) * 0.9)
-        put(img, glyph("晚安～", 64, (220, 224, 250), kind="r"), 960, 1000, 1, ease_out(seg(t, T_OFF + 0.6, T_OFF + 1.3)) * 0.9)
+        al = ease_out(seg(t, T_OFF + 0.6, T_OFF + 1.3)) * 0.9
+        put(img, glyph("晚安～", 60, (220, 224, 250), kind="r"), 960, 975, 1, al)
+        put(img, glyph("good night", 34, (200, 206, 236), kind="r"), 960, 1035, 1, al)
     arr = np.asarray(img).astype(np.float32) * K.VIG + K.GRAIN[fi % 4] * 0.8
     if t < 0.5: arr *= t / 0.5
     if t > END - 1.0: arr *= clamp((END - t) / 0.9)
