@@ -245,8 +245,38 @@ def flat(a):
     return "躺平了"
 
 
+def dummy(a):
+    # puppy-meme pose: head down, eyes low, a "100% 笨蛋" label on the forehead
+    a.body(left_arm=False, right_arm=False)
+    a.R(8, 28, 12, 32, ORANGE); a.R(52, 28, 56, 32, ORANGE)       # drooped arms
+    for ex in (20, 38):                                            # eyes looking down
+        a.R(ex, 24, ex + 4, 31, EYE); a.P(ex + 1, 25, WHITE); a.P(ex + 2, 25, WHITE)
+    a.R(14, 31, 18, 33, BLUSH); a.R(46, 31, 50, 33, BLUSH)
+    a.R(30, 33, 33, 34, EYE)
+    a.label = (44, 15)                                             # drawn later, at a finer grid
+    a.shadow()
+    return "笨蛋本蛋"
+
+
+def badge():
+    """Yellow round '100% 笨蛋' label, on a 3px grid."""
+    n = 48
+    m = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    d = ImageDraw.Draw(m)
+    d.ellipse([1, 1, n - 2, n - 2], fill=(230, 190, 20, 255))
+    d.ellipse([3, 3, n - 4, n - 4], fill=(252, 226, 40, 255))
+    d.ellipse([8, 6, 16, 12], fill=(255, 244, 150, 255))           # shine
+    for i, line in enumerate(("100%", "笨蛋")):
+        w = FONT.getlength(line)
+        d.text(((n - w) / 2, 7 + i * 17), line, font=FONT, fill=EYE)
+        d.text(((n - w) / 2 + 1, 7 + i * 17), line, font=FONT, fill=EYE)   # faux bold
+    edge = m.getchannel("A").filter(ImageFilter.MaxFilter(3))      # white sticker edge
+    bg = Image.new("RGBA", m.size, WHITE); bg.putalpha(edge); m = Image.alpha_composite(bg, m)
+    return m.resize((n * 3, n * 3), Image.NEAREST)
+
+
 STICKERS = [("hello", hello), ("yay", yay), ("cry", cry), ("angry", angry), ("goodnight", night), ("huh", huh),
-            ("love", love), ("roger", roger), ("shock", shock), ("shy", shy), ("melon", melon), ("flat", flat)]
+            ("love", love), ("roger", roger), ("shock", shock), ("shy", shy), ("melon", melon), ("flat", flat), ("dummy", dummy)]
 
 
 def caption(text):
@@ -268,6 +298,10 @@ def render(fn):
     art = Image.alpha_composite(border, art)
     big = Image.new("RGBA", (A * SCALE, A * SCALE), (0, 0, 0, 0))
     big.alpha_composite(art.resize(big.size, Image.NEAREST), (0, 0))
+    if getattr(a, "label", None):
+        b = badge()
+        lx, ly = a.label
+        big.alpha_composite(b, (lx * SCALE - b.width // 2, ly * SCALE - b.height // 2))
     cap = caption(text)
     cap = cap.resize((cap.width * TXT_SCALE, cap.height * TXT_SCALE), Image.NEAREST)
     big.alpha_composite(cap, ((big.width - cap.width) // 2, big.height - cap.height - 4))
