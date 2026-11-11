@@ -3,7 +3,8 @@ import sys
 from PIL import Image
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "clawd_bunny.png"
-W, H, SCALE = 72, 56, 16
+W, H, SCALE = 72, 72, 16
+OY = 10                     # shift the drawing down to center it in the square
 
 BG = (246, 236, 240)
 DOT = (236, 220, 228)
@@ -31,12 +32,13 @@ img = Image.new("RGB", (W, H), BG)
 px = img.load()
 
 def P(x, y, c):
+    y += OY
     if 0 <= x < W and 0 <= y < H: px[x, y] = c
 def R(x0, y0, x1, y1, c):           # inclusive-exclusive rectangle
     for y in range(y0, y1):
         for x in range(x0, x1): P(x, y, c)
 
-for y in range(2, H, 8):
+for y in range(2 - 16, H, 8):
     for x in range(2 + (y // 8 % 2) * 4, W, 8): P(x, y, DOT)
 
 R(14, 49, 58, 51, SHADOW); R(17, 51, 55, 52, SHADOW)
