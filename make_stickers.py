@@ -44,12 +44,12 @@ class Art:
         for x, y in pts: self.P(x, y, c)
 
     # Clawd: body x 12..52, y 12..36, legs to 44; arms at y 24..28
-    def body(self, left_arm=True, right_arm=True, legs=True):
+    def body(self, left_arm=True, right_arm=True, legs=True, leg_len=8):
         self.R(12, 12, 52, 36, ORANGE)
         self.R(12, 12, 52, 13, ORANGE_L)
         self.R(12, 35, 52, 36, ORANGE_D)
         if legs:
-            for lx in (16, 24, 36, 44): self.R(lx, 36, lx + 4, 44, ORANGE)
+            for lx in (16, 24, 36, 44): self.R(lx, 36, lx + 4, 36 + leg_len, ORANGE)
         if left_arm: self.R(8, 24, 12, 28, ORANGE)
         if right_arm: self.R(52, 24, 56, 28, ORANGE)
 
@@ -75,9 +75,9 @@ class Art:
             for gx in range(m.width):
                 if m.getpixel((gx, gy)) > 128: self.P(x + gx, y + gy, c)
 
-    def shadow(self):
+    def shadow(self, y=45):
         d, self.dy = self.dy, 0
-        self.R(14, 45, 50, 47, SHADOW)
+        self.R(14, y, 50, y + 2, SHADOW)
         self.dy = d
 
 
@@ -247,15 +247,15 @@ def flat(a):
 
 def dummy(a):
     # puppy-meme pose: head down, eyes low, a "100% 笨蛋" label on the forehead
-    a.body(left_arm=False, right_arm=False)
+    a.body(left_arm=False, right_arm=False, leg_len=4)
     a.R(8, 28, 12, 32, ORANGE); a.R(52, 28, 56, 32, ORANGE)       # drooped arms
     for ex in (20, 38):                                            # eyes looking down
         a.R(ex, 24, ex + 4, 31, EYE); a.P(ex + 1, 25, WHITE); a.P(ex + 2, 25, WHITE)
     a.R(14, 31, 18, 33, BLUSH); a.R(46, 31, 50, 33, BLUSH)
     a.R(30, 33, 33, 34, EYE)
     a.label = (44, 15)                                             # drawn later, at a finer grid
-    a.shadow()
-    return "笨蛋本蛋"
+    a.shadow(41)
+    return ""
 
 
 def badge():
@@ -296,12 +296,19 @@ def render(fn):
     mask = art.getchannel("A").point(lambda v: 255 if v > 60 else 0).filter(ImageFilter.MaxFilter(3))
     border = Image.new("RGBA", art.size, WHITE); border.putalpha(mask)
     art = Image.alpha_composite(border, art)
+    oy = 0 if text else 9 * SCALE          # no caption: center the art vertically
     big = Image.new("RGBA", (A * SCALE, A * SCALE), (0, 0, 0, 0))
     big.alpha_composite(art.resize(big.size, Image.NEAREST), (0, 0))
     if getattr(a, "label", None):
         b = badge()
         lx, ly = a.label
         big.alpha_composite(b, (lx * SCALE - b.width // 2, ly * SCALE - b.height // 2))
+    if oy:
+        moved = Image.new("RGBA", big.size, (0, 0, 0, 0))
+        moved.alpha_composite(big, (0, oy))
+        big = moved
+    if not text:
+        return big
     cap = caption(text)
     cap = cap.resize((cap.width * TXT_SCALE, cap.height * TXT_SCALE), Image.NEAREST)
     big.alpha_composite(cap, ((big.width - cap.width) // 2, big.height - cap.height - 4))
