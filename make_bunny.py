@@ -3,7 +3,7 @@ import sys
 from PIL import Image
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "clawd_bunny.png"
-W, H, SCALE = 72, 64, 16
+W, H, SCALE = 72, 56, 16
 
 BG = (246, 236, 240)
 DOT = (236, 220, 228)
@@ -18,7 +18,6 @@ SUIT_L = (72, 66, 86)
 EAR_IN = (240, 160, 175)
 RED = (204, 52, 68)
 RED_D = (150, 36, 52)
-NET = (120, 62, 50)
 BLUSH = (240, 150, 150)
 PINK = (238, 140, 160)
 CARROT = (240, 140, 50)
@@ -40,7 +39,7 @@ def R(x0, y0, x1, y1, c):           # inclusive-exclusive rectangle
 for y in range(2, H, 8):
     for x in range(2 + (y // 8 % 2) * 4, W, 8): P(x, y, DOT)
 
-R(14, 56, 58, 58, SHADOW); R(17, 58, 55, 59, SHADOW)
+R(14, 49, 58, 51, SHADOW); R(17, 51, 55, 52, SHADOW)
 
 # ---- bunny ears on a headband (left one bent)
 def ear(x0, top, bent):
@@ -103,15 +102,10 @@ for x, y in ((54, 39), (55, 39), (56, 39), (53, 40), (54, 40), (55, 40), (56, 40
     P(x, y, WHITE)
 P(56, 41, FRILL); P(57, 41, FRILL); P(56, 42, FRILL)
 
-# ---- fishnet legs + heels
+# ---- short stubby legs
 for lx in (18, 26, 38, 46):
-    R(lx, 44, lx + 4, 53, ORANGE)
-    for y in range(44, 53):
-        for x in range(lx, lx + 4):
-            if (x + y) % 4 == 0 or (x - y) % 4 == 0: P(x, y, NET)
-    R(lx - 1, 53, lx + 4, 55, SUIT)              # pump
-    R(lx + 3, 55, lx + 4, 56, SUIT)              # heel
-    P(lx, 53, SUIT_L)
+    R(lx, 44, lx + 4, 49, ORANGE)
+    R(lx, 48, lx + 4, 49, ORANGE_D)
 
 # ---- arms + white cuffs
 # left arm: hand on hip
@@ -138,7 +132,7 @@ R(57, 21, 61, 23, WHITE); P(58, 23, GOLD)   # cuff over the carrot tip
 def heart(x, y, c):
     for dx, dy in ((0, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (2, 1), (3, 1), (0, 2), (1, 2), (2, 2), (1, 3)):
         P(x + dx, y + dy, c)
-heart(5, 12, PINK); heart(64, 32, PINK); heart(6, 44, (240, 170, 185))
+heart(5, 12, PINK); heart(64, 32, PINK); heart(6, 42, (240, 170, 185))
 for sx, sy in ((33, 5), (4, 24), (66, 47), (51, 6)):
     P(sx, sy, GOLD); P(sx - 1, sy, ORANGE_L); P(sx + 1, sy, ORANGE_L); P(sx, sy - 1, ORANGE_L); P(sx, sy + 1, ORANGE_L)
 
